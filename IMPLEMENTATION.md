@@ -243,3 +243,54 @@ document.documentElement.style.colorScheme = resolvedTheme
 - `npm install --package-lock-only --ignore-scripts --fetch-retries=0 --fetch-timeout=10000 --cache=/private/tmp/dayflow-security-npm-cache`는 `registry.npmjs.org`의 `ENOTFOUND`로 실패했습니다. `package-lock.json`은 생성되지 않았고, 실제 설치본은 아직 Start `1.168.51`·Router `1.170.34`·서버 코어 `1.169.33`입니다.
 - 수정 버전을 설치하지 못했으므로 이번 작업에서 업데이트 후 통합 테스트·빌드 성공 또는 Vercel 배포 성공을 확인하지 않았습니다.
 - 남은 작업: 네트워크가 가능한 환경에서 README의 `npm install`과 설치 트리 확인 → 타입·단위·통합·Vercel 빌드 검증 → 생성한 lockfile과 변경 파일 커밋·푸시 → 재배포.
+
+## 배포 첫 접속 HTTPError 500 조사와 인증 초기화 수정
+
+사용자가 보고한 JSON은 처리되지 않은 서버 예외의 일반 응답이므로 실제 Vercel 원인은 런타임 오류와 스택 없이 확정할 수 없습니다. 로컬 빌드 산출물에서 운영 인증 설정이 없으면 보호 페이지의 세션 조회가 실패하는 것을 확인했습니다. Vercel 빌드에는 기존 `prestart`의 운영 설정 검사가 연결돼 있지 않았습니다. 이 두 경로를 수정하고, 인증 실패를 추적할 서버 로그와 운영 모드 회귀 검증을 추가했습니다.
+
+### 이번 작업의 변경 파일과 코드
+
+| 파일 | 구분 | 실제 추가·수정·삭제 코드 |
+| --- | --- | --- |
+| [src/server/auth/config.server.ts](/Users/leewoonhee/Project/tts/ticktick-copy/src/server/auth/config.server.ts:1) | 추가 | `required`, `getAuthConfigurationIssues(env)`로 필수 설정·공백·비밀키 길이·공개 URL·운영 local 저장 모드를 검사하고 값 대신 필드 이름 반환 |
+| [src/server/auth/config.server.test.ts](/Users/leewoonhee/Project/tts/ticktick-copy/src/server/auth/config.server.test.ts:1) | 추가 | 정상·누락·공백·짧은 키·잘못된 URL·운영 local 거절·개발 HTTP 허용을 다루는 단위 테스트 6개 |
+| [src/server/auth/auth.server.ts](/Users/leewoonhee/Project/tts/ticktick-copy/src/server/auth/auth.server.ts:32) | 수정 | `withAuth`의 기존 단순 환경변수 조건문을 공통 검사로 교체. 초기화 오류 로그와 재전파 추가. `getSession`은 Better Auth 세션 쿠키가 없으면 `null`을 반환해 OAuth·DB 초기화 생략. 쿠키가 있으면 기존 검증을 유지하고 실패 상태 기록 |
+| [src/server/functions/auth.ts](/Users/leewoonhee/Project/tts/ticktick-copy/src/server/functions/auth.ts:12) | 수정 | `getAuthMode.googleConfigured`의 일부 환경변수 존재 검사식을 삭제하고 `getAuthConfigurationIssues().length === 0` 재사용. 누락된 URL·짧은 비밀키도 비활성화에 반영 |
+| [scripts/check-production.mjs](/Users/leewoonhee/Project/tts/ticktick-copy/scripts/check-production.mjs:10) | 수정 | 공백 값, 운영 URL의 HTTPS·origin 형식 검증 추가. 설정값을 출력하지 않고 기존 필드별 오류 형식 유지 |
+| [scripts/integration.mjs](/Users/leewoonhee/Project/tts/ticktick-copy/scripts/integration.mjs:10) | 수정 | `production` CLI 분기, 운영 모드 별도 프로세스, 첫 방문 리다이렉트 체인·로그인 SSR·접근 차단·위조 쿠키·로그 검증 11개 추가. 기존 로컬 흐름 26개 유지. 프레임워크 오류 역직렬화를 위해 `defaultSerovalPlugins` 사용 |
+| [package.json](/Users/leewoonhee/Project/tts/ticktick-copy/package.json:15) | 수정 | `scripts["test:integration:production"]` 추가. 이번 작업에서 의존성 버전은 변경하지 않음 |
+| [vercel.json](/Users/leewoonhee/Project/tts/ticktick-copy/vercel.json:3) | 수정 | `buildCommand`의 Nitro 빌드 전에 `npm run verify:production` 실행하도록 연결 |
+| [.github/workflows/check.yml](/Users/leewoonhee/Project/tts/ticktick-copy/.github/workflows/check.yml:20) | 수정 | CI에 운영 첫 방문 회귀 검증 명령 추가 |
+| [README.md](/Users/leewoonhee/Project/tts/ticktick-copy/README.md:121) | 수정 | 500 진단, Vercel 운영 환경변수, 재배포 및 신규 검증 절차 설명 |
+| [IMPLEMENTATION.md](/Users/leewoonhee/Project/tts/ticktick-copy/IMPLEMENTATION.md:247) | 수정 | 이번 작업의 파일별 변경·영향·검증·배포 원인 확인 한계 기록 |
+
+삭제 파일은 없습니다. 인증 설정 판단을 공통 함수로 추출한 것 외에 UI·도메인 서비스 리팩터링은 없습니다. 이전 보안 버전 업데이트와 테마 변경은 이번 변경 내역에 포함하지 않습니다.
+
+### 핵심 변경
+
+```ts
+if (!getCookie('better-auth.session_token') && !getCookie('__Secure-better-auth.session_token'))
+  return null
+```
+
+이는 쿠키 부재를 비로그인으로 처리할 뿐 인증을 우회하지 않습니다. 쿠키가 있으면 Better Auth 검증을 거치며, 설정 오류를 삼키고 로그인 성공으로 바꾸지 않습니다.
+
+```diff
+- "buildCommand": "NITRO_PRESET=vercel npm run build"
++ "buildCommand": "npm run verify:production && NITRO_PRESET=vercel npm run build"
+```
+
+### 영향과 남은 작업
+
+- DB·마이그레이션·API 응답 구조 변경 없음. 신규 환경변수 없음.
+- 기존 필수 환경변수 검증이 Vercel 빌드에도 적용됩니다. 운영 공개 URL은 경로 없는 HTTPS origin이어야 하며, 누락·잘못된 설정이나 Better Auth 미설치 상태에서는 이제 빌드를 중단합니다.
+- 실제 Vercel 설정·로그·배포 URL에 접근하지 않았고, 원격 환경변수 변경·재배포·DB 마이그레이션은 수행하지 않았습니다. 실제 500 원인의 확정과 해결 확인에는 해당 요청의 런타임 로그가 필요합니다.
+- 실제 Google OAuth·Neon 연결과 업데이트된 TanStack 의존성 설치는 기존 환경 제한으로 검증하지 못했습니다. 네트워크 가능한 환경에서 의존성 설치, 운영 설정, 빌드·재배포가 남아 있습니다.
+
+### 검증
+
+- 타입 검사, 단위 테스트 37개(assertion 112개), 기존 개발 통합 검증 26개 통과.
+- 운영 통합 검증 11개 통과: 자격증명 없는 세션·로그인 SSR, 첫 방문 307→307→200, 운영 로컬 인증 비노출, 작업 공간 접근 차단, 위조 세션 거절, 서버 설정 오류 로그.
+- `npm run build` 클라이언트·SSR·Nitro 빌드 통과. 빌드 산출물을 포트 없이 운영 모드로 직접 호출해 첫 방문이 307→307→200으로 로그인 화면에 도달하는 것도 확인했습니다.
+- 운영 검사 CLI가 누락 설정·잘못된 URL·짧은 키·로컬 저장 모드를 거절하고 설정값은 출력하지 않는 것을 검증했습니다. 변경 코드의 Prettier 검사 통과.
+- 위 검증은 기존 로컬 설치본에 대한 결과입니다. Better Auth 미설치 경고가 있으며, 보안 업데이트 의존성의 실제 설치와 Vercel 배포 성공을 의미하지 않습니다.

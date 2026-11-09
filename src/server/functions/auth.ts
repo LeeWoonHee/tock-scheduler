@@ -1,4 +1,5 @@
 import { createServerFn } from '@tanstack/react-start'
+import { getAuthConfigurationIssues } from '../auth/config.server'
 import {
   getSession,
   isLocalMode,
@@ -12,12 +13,7 @@ export const getAuthMode = createServerFn({ method: 'GET' }).handler(() => {
   privateResponse()
   return {
     local: isLocalMode(),
-    googleConfigured:
-      !isLocalMode() &&
-      !!process.env.GOOGLE_CLIENT_ID &&
-      !!process.env.GOOGLE_CLIENT_SECRET &&
-      !!process.env.BETTER_AUTH_SECRET &&
-      !!process.env.DATABASE_URL,
+    googleConfigured: !isLocalMode() && getAuthConfigurationIssues().length === 0,
   }
 })
 export const localLogin = createServerFn({ method: 'POST' }).handler(() => {

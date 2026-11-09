@@ -7,9 +7,25 @@ const required = [
   'GOOGLE_CLIENT_ID',
   'GOOGLE_CLIENT_SECRET',
 ]
-const missing = required.filter((key) => !process.env[key])
+const missing = required.filter((key) => !process.env[key]?.trim())
 if ((process.env.BETTER_AUTH_SECRET?.length ?? 0) < 32 && !missing.includes('BETTER_AUTH_SECRET'))
   missing.push('BETTER_AUTH_SECRET (32자 이상)')
+if (process.env.BETTER_AUTH_URL) {
+  try {
+    const url = new URL(process.env.BETTER_AUTH_URL)
+    if (
+      url.protocol !== 'https:' ||
+      url.username ||
+      url.password ||
+      url.pathname !== '/' ||
+      url.search ||
+      url.hash
+    )
+      missing.push('BETTER_AUTH_URL (배포 사이트의 HTTPS origin)')
+  } catch {
+    missing.push('BETTER_AUTH_URL (유효한 URL)')
+  }
+}
 try {
   createRequire(import.meta.url).resolve('better-auth')
 } catch {

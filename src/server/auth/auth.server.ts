@@ -11,6 +11,7 @@ import type { SessionDTO } from '@/features/tasks/types'
 import { DomainError } from '../services/errors'
 import { withDatabase, type Database } from '@/db/client.server'
 import * as schema from '@/db/schema'
+import { getAuthConfigurationIssues } from './config.server'
 
 export function isLocalMode() {
   return (
@@ -29,30 +30,39 @@ export function privateResponse() {
 type AuthInstance = { handler: (request: Request) => Promise<Response> }
 // Loaded only on the server. Local development does not import OAuth dependencies.
 export async function withAuth<T>(run: (auth: AuthInstance) => Promise<T>) {
+  const issues = getAuthConfigurationIssues()
+  if (issues.length) {
+    // Log field names only: configuration values can contain credentials.
+    console.error('[dayflow:auth] Invalid configuration', { fields: issues })
+    throw new Error('Authentication configuration is invalid')
+  }
   const {
     BETTER_AUTH_SECRET: secret,
     BETTER_AUTH_URL: baseURL,
     GOOGLE_CLIENT_ID: clientId,
     GOOGLE_CLIENT_SECRET: clientSecret,
   } = process.env
-  if (!secret || secret.length < 32 || !baseURL || !clientId || !clientSecret)
-    throw new Error('Google OAuth and Better Auth environment variables are required')
-  return withDatabase(async (db: Database) => {
-    const { betterAuth } = await import(/* @vite-ignore */ require.resolve('better-auth'))
-    const { drizzleAdapter } = await import(
-      /* @vite-ignore */ require.resolve('better-auth/adapters/drizzle')
-    )
-    // Sign-in and callbacks use the HTTP handler, which owns its Set-Cookie headers.
-    const auth = betterAuth({
-      database: drizzleAdapter(db, { provider: 'pg', schema }),
-      secret,
-      baseURL,
-      trustedOrigins: [new URL(baseURL).origin],
-      socialProviders: { google: { clientId, clientSecret } },
-      advanced: { useSecureCookies: process.env.NODE_ENV === 'production' },
-    }) as AuthInstance
-    return run(auth)
-  })
+  try {
+    return await withDatabase(async (db: Database) => {
+      const { betterAuth } = await import(/* @vite-ignore */ require.resolve('better-auth'))
+      const { drizzleAdapter } = await import(
+        /* @vite-ignore */ require.resolve('better-auth/adapters/drizzle')
+      )
+      // Sign-in and callbacks use the HTTP handler, which owns its Set-Cookie headers.
+      const auth = betterAuth({
+        database: drizzleAdapter(db, { provider: 'pg', schema }),
+        secret,
+        baseURL,
+        trustedOrigins: [new URL(baseURL!).origin],
+        socialProviders: { google: { clientId, clientSecret } },
+        advanced: { useSecureCookies: process.env.NODE_ENV === 'production' },
+      }) as AuthInstance
+      return run(auth)
+    })
+  } catch (error) {
+    console.error('[dayflow:auth] Authentication request failed', error)
+    throw error
+  }
 }
 export async function getSession(): Promise<SessionDTO | null> {
   privateResponse()
@@ -67,6 +77,10 @@ export async function getSession(): Promise<SessionDTO | null> {
       return null
     return { user: { id: 'local-user', name: '나', email: '' }, mode: 'local' }
   }
+  // No cookie means no authenticated user. Do not initialize OAuth or the DB
+  // just to render the public login page. Cookie presence never grants access.
+  if (!getCookie('better-auth.session_token') && !getCookie('__Secure-better-auth.session_token'))
+    return null
   const response = await withAuth((auth) =>
     auth.handler(
       new Request(new URL('/api/auth/get-session', process.env.BETTER_AUTH_URL), {
@@ -74,7 +88,10 @@ export async function getSession(): Promise<SessionDTO | null> {
       }),
     ),
   )
-  if (!response.ok) throw new Error('Session validation failed')
+  if (!response.ok) {
+    console.error('[dayflow:auth] Session validation failed', { status: response.status })
+    throw new Error('Session validation failed')
+  }
   const cookies = response.headers.getSetCookie()
   if (cookies.length) setResponseHeader('Set-Cookie', cookies)
   const session = (await response.json()) as {

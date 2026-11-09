@@ -77,10 +77,13 @@ npm start
 npm run typecheck
 npm test
 npm run test:integration
+npm run test:integration:production
 npm run build
 ```
 
 단위 테스트는 날짜·DST·기간 경계, 워크스페이스 격리, 동시 Inbox 초기화, 재시도, 버전 충돌, 복원, 정렬, 태그 정규화와 목록 간 동일성을 검증합니다. `scripts/integration.mjs`는 포트를 열지 않고 실제 Vite SSR 핸들러에 Request를 전달해 로그인 쿠키·CSRF·서버 함수·목록·캘린더·되돌리기·저장 상태를 검증합니다. 테스트 저장소는 임시 폴더에서 생성하고 정리합니다.
+
+`test:integration:production`은 별도 프로세스의 운영 모드에서 인증·DB 설정이 없는 첫 방문, 로그인 SSR, 작업 공간 접근 차단, 위조 쿠키 거절과 서버 진단 로그를 검증합니다. 실제 Google OAuth 또는 Neon 연결 테스트는 아닙니다.
 
 수동 브라우저 검증 흐름:
 
@@ -114,6 +117,26 @@ NITRO_PRESET=vercel npm run build
 출력의 모든 `@tanstack/start-server-core`가 `1.169.39`인지 확인하고, 변경한 `package.json`과 생성된 `package-lock.json`을 함께 커밋·푸시한 뒤 Vercel에서 재배포하세요. 이전 버전이 계속 설치되면 새 커밋이 배포 대상인지 확인하고 기존 빌드 캐시를 사용하지 않고 재배포하세요. 취약 버전 배포를 허용하는 환경변수는 설정하지 않습니다.
 
 이 작업 환경에서는 npm 레지스트리 DNS 접근이 차단되어 업데이트 설치·lockfile 생성·수정 버전의 빌드를 완료하지 못했습니다. 기존 설치본으로 수행한 검증은 수정 버전 프레임워크의 검증을 대신하지 않습니다.
+
+### 첫 접속에서 HTTPError 500이 보일 때
+
+`{"status":500,"unhandled":true,"message":"HTTPError"}`는 서버의 처리되지 않은 예외를 가린 응답이므로 이 문구만으로 원인을 확정할 수 없습니다. Vercel의 프로젝트 → Logs에서 해당 배포·500 응답으로 필터링해 요청 시점의 오류와 스택을 확인하세요. [Vercel Runtime Logs 문서](https://vercel.com/docs/logs/runtime)를 참고할 수 있습니다.
+
+첫 접속의 세션 조회가 OAuth·DB를 초기화하던 경로는 수정했습니다. 세션 쿠키가 없으면 비로그인으로 처리해 로그인 화면을 표시하고, 인증 설정이 잘못됐으면 Google 로그인을 비활성화합니다. 쿠키가 있는 경우에는 기존처럼 Better Auth로 검증하며, 설정 오류를 비로그인 성공으로 바꾸지 않습니다. 인증 초기화·DB·패키지 오류는 `[dayflow:auth]` 접두사로 서버 로그에 기록합니다. 설정 오류에는 필드 이름만 기록합니다.
+
+Vercel → Project → Settings → Environment Variables에 배포 대상 환경(Production 및 필요한 Preview)의 값을 등록하세요.
+
+| 변수 | 운영 설정 |
+| --- | --- |
+| `APP_STORAGE` | `postgres` (`local`은 운영에서 거절) |
+| `DATABASE_URL` | Neon PostgreSQL pooled 연결 URL |
+| `BETTER_AUTH_SECRET` | 32자 이상의 인증 비밀키 |
+| `BETTER_AUTH_URL` | 실제 사이트의 HTTPS origin, 예: `https://프로젝트.vercel.app` (경로·쿼리 제외) |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google OAuth 클라이언트 정보 |
+
+`.env.example`의 로컬 기본값을 Vercel에 그대로 복사하지 마세요. Google OAuth 콜백도 위 도메인의 `/api/auth/callback/google`로 등록합니다. 환경변수를 변경한 뒤에는 새 배포가 필요합니다.
+
+Vercel 빌드는 이제 `npm run verify:production`을 먼저 실행합니다. 필수 설정 누락·짧은 비밀키·잘못된 공개 URL·Better Auth 미설치·로컬 저장 모드가 있으면 필드 이름을 표시하고 빌드를 중단합니다. 이 검사는 실제 DB 연결이나 테이블 존재, OAuth 성공까지 보장하지 않으므로 설정 후에도 실패하면 Logs의 구체적인 오류를 확인하세요. 비밀키·DB 연결 문자열·쿠키 값은 외부에 공유하지 않습니다.
 
 2차 범위: 반복 규칙·회차 예외·주간 캘린더·칸반·인앱/이메일 알림·보호된 디스패치 엔드포인트·선점과 재시도 워커. `CRON_SECRET`, `EMAIL_API_KEY`, `EMAIL_FROM`은 예시만 있으며 이번 구현에서 사용하지 않습니다. 공유·첨부·오프라인 동기화 등은 기획서의 후속 단계입니다.
 
