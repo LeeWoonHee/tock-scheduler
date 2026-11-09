@@ -96,6 +96,25 @@ npm run build
 
 Vercel 프로젝트에서 `vercel.json`의 Nitro 빌드 설정을 사용하고 환경별 Neon과 OAuth 값을 등록하세요. PR 검증 워크플로를 추가했으며 원격 실행·배포는 하지 않았습니다. 마이그레이션은 별도 CI 권한으로 검토 후 한 번 적용하세요.
 
+### TanStack Start 보안 업데이트와 Vercel E403
+
+`@tanstack/start-server-core@1.169.33` 다운로드 시 발생하는 Vercel E403은 [CVE-2026-102989 보안 차단](https://github.com/TanStack/router/security/advisories/GHSA-qx66-fv34-fjm8)입니다. `@tanstack/react-start`를 수정 버전 `1.168.60`으로, `@tanstack/react-router`를 같은 릴리스의 `1.170.41`로 올렸습니다. npm `overrides`는 중첩 의존성의 `@tanstack/start-server-core`도 수정 버전 `1.169.39`를 사용하게 합니다.
+
+레지스트리에 접근 가능한 환경에서 다음을 실행하세요.
+
+```bash
+npm install
+npm ls @tanstack/react-start @tanstack/react-router @tanstack/start-server-core --all
+npm run typecheck
+npm test
+npm run test:integration
+NITRO_PRESET=vercel npm run build
+```
+
+출력의 모든 `@tanstack/start-server-core`가 `1.169.39`인지 확인하고, 변경한 `package.json`과 생성된 `package-lock.json`을 함께 커밋·푸시한 뒤 Vercel에서 재배포하세요. 이전 버전이 계속 설치되면 새 커밋이 배포 대상인지 확인하고 기존 빌드 캐시를 사용하지 않고 재배포하세요. 취약 버전 배포를 허용하는 환경변수는 설정하지 않습니다.
+
+이 작업 환경에서는 npm 레지스트리 DNS 접근이 차단되어 업데이트 설치·lockfile 생성·수정 버전의 빌드를 완료하지 못했습니다. 기존 설치본으로 수행한 검증은 수정 버전 프레임워크의 검증을 대신하지 않습니다.
+
 2차 범위: 반복 규칙·회차 예외·주간 캘린더·칸반·인앱/이메일 알림·보호된 디스패치 엔드포인트·선점과 재시도 워커. `CRON_SECRET`, `EMAIL_API_KEY`, `EMAIL_FROM`은 예시만 있으며 이번 구현에서 사용하지 않습니다. 공유·첨부·오프라인 동기화 등은 기획서의 후속 단계입니다.
 
 ## 주요 파일

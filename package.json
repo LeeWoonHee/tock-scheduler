@@ -23,9 +23,9 @@
     "@radix-ui/react-dropdown-menu": "2.1.24",
     "@radix-ui/react-popover": "1.1.23",
     "@tanstack/react-query": "5.91.2",
-    "@tanstack/react-router": "1.170.34",
+    "@tanstack/react-router": "1.170.41",
     "@tanstack/react-router-ssr-query": "1.166.9",
-    "@tanstack/react-start": "1.168.51",
+    "@tanstack/react-start": "1.168.60",
     "better-auth": "1.4.18",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
@@ -55,6 +55,9 @@
     "vite": "8.2.2",
     "seroval": "1.6.7",
     "prettier": "3.9.6"
+  },
+  "overrides": {
+    "@tanstack/start-server-core": "1.169.39"
   },
   "engines": {
     "node": ">=22.12.0"

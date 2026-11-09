@@ -203,3 +203,43 @@ document.documentElement.style.colorScheme = resolvedTheme
 - 기존 Better Auth 미설치 빌드 경고는 이번 변경과 무관하며 그대로 남아 있습니다.
 - 구현 TODO 없음. 실제 브라우저의 시각·클릭 검증은 기존 실행 환경의 포트 제한으로 수행하지 못했습니다.
 - 수동 확인: 좌측 아래 계정 메뉴 → 설정 → 화면 모드 선택 → 목록·달력·날짜 팝오버·상세·알림 확인 → 새로고침 → 다른 탭·시스템 모드 변경 확인.
+
+## Vercel E403: TanStack Start 보안 의존성 수정
+
+기존 `@tanstack/react-start@1.168.51`의 서버 코어 `1.169.33`은 [공식 보안 권고 GHSA-qx66-fv34-fjm8](https://github.com/TanStack/router/security/advisories/GHSA-qx66-fv34-fjm8)의 CVE-2026-102989 영향 버전이므로 Vercel에서 설치가 차단되었습니다. 프레임워크를 공식 수정 버전으로 올리고, 같은 릴리스의 React Router를 사용하도록 맞췄습니다.
+
+### 이번 작업의 변경 파일과 코드
+
+| 파일 | 구분 | 추가·수정·삭제한 내용 |
+| --- | --- | --- |
+| [package.json](/Users/leewoonhee/Project/tts/ticktick-copy/package.json:26) | 수정·추가 | `dependencies`의 `@tanstack/react-router`를 `1.170.34 → 1.170.41`, `@tanstack/react-start`를 `1.168.51 → 1.168.60`으로 수정. `overrides["@tanstack/start-server-core"] = "1.169.39"`를 추가해 중첩 의존성에도 수정 버전 적용 |
+| [README.md](/Users/leewoonhee/Project/tts/ticktick-copy/README.md:99) | 수정 | Vercel E403 원인, 보안 권고, 재설치·설치 트리 확인·검증·lockfile 커밋·재배포 절차 추가 |
+| [IMPLEMENTATION.md](/Users/leewoonhee/Project/tts/ticktick-copy/IMPLEMENTATION.md:207) | 수정 | 이번 보안 수정의 코드 변경·영향·검증 한계·남은 작업 기록 |
+
+핵심 변경:
+
+```diff
+-    "@tanstack/react-router": "1.170.34",
++    "@tanstack/react-router": "1.170.41",
+-    "@tanstack/react-start": "1.168.51",
++    "@tanstack/react-start": "1.168.60",
++  "overrides": {
++    "@tanstack/start-server-core": "1.169.39"
++  },
+```
+
+신규·삭제 파일과 리팩터링은 없습니다. 이전 작업에서 구현한 앱 코드와 UI는 이번 변경에 포함하지 않습니다.
+
+### 영향
+
+- DB·스키마·API·환경변수 변경 없음. 의도적인 호환성 파괴 없음.
+- 설치되는 TanStack Start·Router 및 관련 하위 패키지는 변경됩니다. 업데이트 후 타입 검사와 SSR·빌드 재검증이 필요합니다.
+- 취약 버전 배포를 허용하는 환경변수는 추가하지 않았습니다. 기존 Vercel의 `npm install` 및 Nitro 빌드 설정을 유지합니다.
+
+### 검증과 남은 작업
+
+- `package.json` JSON 파싱, 수정 버전 3개, Vercel 설치·빌드 명령, 보안 차단 우회 미사용을 Node assert로 확인했습니다.
+- `npm run typecheck` 통과. `npm test` 단위 테스트 31개, assertion 93개 통과. 이는 **기존 설치본을 사용한 검증**입니다.
+- `npm install --package-lock-only --ignore-scripts --fetch-retries=0 --fetch-timeout=10000 --cache=/private/tmp/dayflow-security-npm-cache`는 `registry.npmjs.org`의 `ENOTFOUND`로 실패했습니다. `package-lock.json`은 생성되지 않았고, 실제 설치본은 아직 Start `1.168.51`·Router `1.170.34`·서버 코어 `1.169.33`입니다.
+- 수정 버전을 설치하지 못했으므로 이번 작업에서 업데이트 후 통합 테스트·빌드 성공 또는 Vercel 배포 성공을 확인하지 않았습니다.
+- 남은 작업: 네트워크가 가능한 환경에서 README의 `npm install`과 설치 트리 확인 → 타입·단위·통합·Vercel 빌드 검증 → 생성한 lockfile과 변경 파일 커밋·푸시 → 재배포.
