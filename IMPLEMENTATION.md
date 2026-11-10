@@ -348,3 +348,49 @@ body: JSON.stringify({
 - `NITRO_PRESET=vercel npm run build` 통과. 생성된 Vercel 함수 entry를 직접 호출해 설정 누락 503·origin 불일치 403·문의 코드의 응답/로그 일치를 확인했습니다.
 - Prettier와 `git diff --check` 통과. 점검용 생성 산출물은 소스 변경에 포함하지 않습니다.
 - npm 레지스트리는 여전히 `ENOTFOUND`여서 Better Auth 설치를 완료하지 못했습니다. 위 테스트·빌드는 기존 로컬 TanStack 설치본에 대한 결과이며, 실제 Better Auth·Google·Neon의 로그인 성공을 검증한 결과는 아닙니다.
+
+## Better Auth 내부 500의 원본 예외 전달 보완
+
+사용자가 보낸 `Sign-in failed`·`status: 500` 로그로 Better Auth 핸들러가 500 응답을 반환한 경로를 확인했습니다. 외부 catch는 실행되지 않아 내부 예외의 SQLSTATE 등이 기존 분류기에 전달되지 않았습니다. [고정 버전 1.4.18의 공식 구현](https://github.com/better-auth/better-auth/blob/v1.4.18/packages/better-auth/src/api/index.ts)에 따라 `onAPIError.throw`를 활성화해 앱의 오류 처리기로 원본 예외를 전달하도록 변경했습니다. 실제 배포 장애의 원인과 로그인 성공은 아직 확정하지 않았습니다.
+
+### 이번 작업의 변경 파일과 코드
+
+| 파일 | 구분 | 실제 변경한 코드 |
+| --- | --- | --- |
+| [src/server/auth/auth.server.ts](/Users/leewoonhee/Project/tts/ticktick-copy/src/server/auth/auth.server.ts:62) | 수정 | `withAuth`의 Better Auth 옵션에 `onAPIError: { throw: true }` 추가. 전체 예외 출력은 `describeAuthFailure`의 제한된 진단으로 교체. `getSession`은 내부 예외를 일반 세션 검증 오류로 교체해 SSR·서버 함수에 DB 원문이 노출되지 않도록 처리 |
+| [src/server/auth/failure.server.ts](/Users/leewoonhee/Project/tts/ticktick-copy/src/server/auth/failure.server.ts:11) | 수정 | cause 탐색을 `errorChain`으로 추출. `authFailureStatus`로 공급자 4xx/5xx 상태 보존. `classifyAuthFailure`에 OAuth state 저장 실패와 4xx 분류 추가. `describeAuthFailure`에 driverCodes·errorNames·인증 테이블 이름만 허용 |
+| [src/routes/api.auth.$.ts](/Users/leewoonhee/Project/tts/ticktick-copy/src/routes/api.auth.$.ts:62) | 수정 | `handle`의 catch에서 요청 ID와 내부 진단을 함께 기록. 일률적인 503 대신 `authFailureStatus(error)` 사용 |
+| [src/server/auth/failure.server.test.ts](/Users/leewoonhee/Project/tts/ticktick-copy/src/server/auth/failure.server.test.ts:12) | 수정 | 4xx 상태 보존·500 내부 SQLSTATE 분류·원문/비밀 값 제외·순환/알 수 없는 상태 테스트 4개 추가 |
+| [scripts/integration.mjs](/Users/leewoonhee/Project/tts/ticktick-copy/scripts/integration.mjs:137) | 수정 | 세션 조회의 실패 기대값을 `Session validation failed`로 변경해 내부 설정 예외를 직접 직렬화하지 않는 동작 검증 |
+| [README.md](/Users/leewoonhee/Project/tts/ticktick-copy/README.md:158) | 수정 | 내부 500 전달 방식과 새 로그 필드, SQLSTATE 확인 절차 설명 |
+| [IMPLEMENTATION.md](/Users/leewoonhee/Project/tts/ticktick-copy/IMPLEMENTATION.md:352) | 수정 | 이번 작업의 변경·검증·원인 미확정 상태 기록 |
+
+신규·삭제 파일은 없습니다. cause 탐색만 공통 함수로 정리했으며 이전 로그인 UI·OAuth 요청 변경은 이번 변경에 포함하지 않습니다.
+
+### 핵심 코드
+
+```ts
+onAPIError: { throw: true }
+```
+
+```ts
+console.error('[dayflow:auth] Handler failed', {
+  requestId, path, ...describeAuthFailure(error),
+})
+return authFailureResponse(code, authFailureStatus(error), requestId)
+```
+
+### 영향과 남은 작업
+
+- DB·스키마·마이그레이션·환경변수·의존성·공개 오류 응답 필드 변경 없음.
+- 내부 오류가 HTTP 처리기로 전파되므로 원래 401·403·429 등은 유지하고, 내부 DB 원인이 있으면 세분화된 앱 오류 코드가 반환됩니다. 세션 조회는 일반 검증 실패로 처리해 내부 원문을 노출하지 않습니다.
+- 앱 진단 로그는 오류 메시지·SQL·파라미터·환경변수 값·쿠키를 기록하지 않습니다. SQLSTATE·오류 타입·미리 허용한 인증 테이블 이름만 기록합니다.
+- 실제 원인의 확정과 장애 복구는 남아 있습니다. 새 배포의 `Handler failed` 로그에 있는 `driverCodes`, `errorNames`, `tables` 및 Neon 초기 마이그레이션 적용 여부가 필요합니다. 원격 설정·DB 변경·배포는 실행하지 않았습니다.
+
+### 검증
+
+- 타입 검사와 단위 테스트 53개(assertion 171개) 통과.
+- 개발 통합 검증 26개, 운영 통합 검증 15개 통과.
+- Vercel 대상 빌드, 변경 코드 Prettier, `git diff --check` 통과.
+- SQLSTATE가 중첩된 예외에서 보존되고, 4xx가 503으로 바뀌지 않으며, 진단 객체에 원문·비밀 값이 포함되지 않는 것을 검증했습니다.
+- Better Auth 미설치와 기존 TanStack 로컬 설치본 제한은 유지됩니다. 실제 Better Auth 오류 훅 실행과 Google·Neon OAuth 왕복은 검증하지 못했으며, 고정 버전 공식 소스로 옵션 동작을 확인했습니다. 빌드 산출물은 소스 변경에 포함하지 않습니다.

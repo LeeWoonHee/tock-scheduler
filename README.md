@@ -155,6 +155,8 @@ Vercel 빌드는 이제 `npm run verify:production`을 먼저 실행합니다. �
 
 Google에 등록한 리디렉션 URI는 `BETTER_AUTH_URL` origin의 `/api/auth/callback/google`과 일치해야 합니다. 현재 접속 URL이 Preview 주소라면 설정한 공식 도메인에서 다시 시도하세요. Google 화면까지 이동한 뒤 오류가 발생하는 경우 Google의 오류 코드와 콜백 설정도 확인해야 합니다.
 
+`[dayflow:auth] Sign-in failed`에 `status: 500`만 보였던 경로는 Better Auth의 `onAPIError.throw`를 활성화해 원본 예외를 앱 오류 처리기로 전달하도록 변경했습니다. 새 배포의 `[dayflow:auth] Handler failed` 로그에서는 `driverCodes`, `errorNames`, `tables`로 내부 원인을 확인합니다. 예를 들어 SQLSTATE `42P01`은 없는 테이블, `42703`은 없는 컬럼, `28P01`은 DB 인증 실패입니다. 알려진 4xx 상태는 유지하며, 세션 조회에는 내부 예외 대신 일반적인 검증 실패만 반환합니다. 진단 로그에는 오류 메시지·SQL·파라미터·쿠키·환경변수 값을 넣지 않습니다. 이 옵션과 분류 개선 자체가 실제 DB 장애를 복구하는 것은 아닙니다.
+
 2차 범위: 반복 규칙·회차 예외·주간 캘린더·칸반·인앱/이메일 알림·보호된 디스패치 엔드포인트·선점과 재시도 워커. `CRON_SECRET`, `EMAIL_API_KEY`, `EMAIL_FROM`은 예시만 있으며 이번 구현에서 사용하지 않습니다. 공유·첨부·오프라인 동기화 등은 기획서의 후속 단계입니다.
 
 ## 주요 파일

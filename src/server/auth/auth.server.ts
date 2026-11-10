@@ -12,7 +12,7 @@ import { DomainError } from '../services/errors'
 import { withDatabase, type Database } from '@/db/client.server'
 import * as schema from '@/db/schema'
 import { getAuthConfigurationIssues } from './config.server'
-import { AuthConfigurationError } from './failure.server'
+import { AuthConfigurationError, describeAuthFailure } from './failure.server'
 
 export function isLocalMode() {
   return (
@@ -57,11 +57,14 @@ export async function withAuth<T>(run: (auth: AuthInstance) => Promise<T>) {
         trustedOrigins: [new URL(baseURL!).origin],
         socialProviders: { google: { clientId, clientSecret } },
         advanced: { useSecureCookies: process.env.NODE_ENV === 'production' },
+        // Preserve the original exception before Better Auth turns it into a
+        // generic 500 response. The HTTP route owns the public error response.
+        onAPIError: { throw: true },
       }) as AuthInstance
       return run(auth)
     })
   } catch (error) {
-    console.error('[dayflow:auth] Authentication request failed', error)
+    console.error('[dayflow:auth] Authentication request failed', describeAuthFailure(error))
     throw error
   }
 }
@@ -88,7 +91,10 @@ export async function getSession(): Promise<SessionDTO | null> {
         headers: getRequestHeaders(),
       }),
     ),
-  )
+  ).catch(() => {
+    // Server functions and SSR must never serialize an internal DB exception.
+    throw new Error('Session validation failed')
+  })
   if (!response.ok) {
     console.error('[dayflow:auth] Session validation failed', { status: response.status })
     throw new Error('Session validation failed')

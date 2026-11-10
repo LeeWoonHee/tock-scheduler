@@ -4,9 +4,56 @@ import {
   authFailureResponse,
   classifyAuthFailure,
   withAuthResponseHeaders,
+  authFailureStatus,
+  describeAuthFailure,
 } from './failure.server'
 
 describe('인증 API 오류 분류', () => {
+  test('Better Auth가 던진 4xx 상태를 503으로 바꾸지 않는다', () => {
+    for (const [status, expected] of [
+      ['UNAUTHORIZED', 401],
+      ['FORBIDDEN', 403],
+      ['TOO_MANY_REQUESTS', 429],
+    ] as const) {
+      const error = { status }
+      expect(authFailureStatus(error)).toBe(expected)
+      expect(classifyAuthFailure(error)).toBe('AUTH_REQUEST_REJECTED')
+    }
+    expect(authFailureStatus({ statusCode: 400 })).toBe(400)
+  })
+  test('일반 500 예외 안에 들어 있는 SQLSTATE가 있으면 DB 오류로 분류한다', () => {
+    const error = {
+      status: 'INTERNAL_SERVER_ERROR',
+      cause: { code: '42P01', table: 'auth_verification' },
+    }
+    expect(authFailureStatus(error)).toBe(500)
+    expect(classifyAuthFailure(error)).toBe('AUTH_DATABASE_NOT_READY')
+  })
+  test('내부 오류 진단에는 원문·SQL·파라미터·비밀 값이 들어가지 않는다', () => {
+    const error = Object.assign(new Error('private-secret postgres://user:password@example/db'), {
+      query: 'insert private-query',
+      params: ['private-cookie'],
+      cause: Object.assign(new Error('private-driver-message'), {
+        code: '42P01',
+        table: 'auth_verification',
+      }),
+    })
+    const diagnostic = describeAuthFailure(error)
+    expect(diagnostic.driverCodes).toEqual(['42P01'])
+    expect(diagnostic.tables).toEqual(['auth_verification'])
+    expect(diagnostic.errorNames).toEqual(['Error'])
+    expect(JSON.stringify(diagnostic)).not.toContain('private')
+    expect(JSON.stringify(diagnostic)).not.toContain('password')
+  })
+  test('알 수 없는 상태값과 순환 원인은 안전한 기본값으로 처리한다', () => {
+    const error: { status: unknown; cause?: unknown } = { status: '__proto__' }
+    error.cause = error
+    expect(authFailureStatus(error)).toBe(503)
+    expect(describeAuthFailure(error).code).toBe('AUTH_SERVICE_UNAVAILABLE')
+    expect(classifyAuthFailure({ code: 'state_generation_error' })).toBe(
+      'AUTH_DATABASE_UNAVAILABLE',
+    )
+  })
   test('변경 불가능한 리디렉션 응답도 Location을 유지한다', () => {
     const response = withAuthResponseHeaders(
       Response.redirect('https://dayflow.example/app/today', 302),

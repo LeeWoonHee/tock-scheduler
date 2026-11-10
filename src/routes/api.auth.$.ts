@@ -4,6 +4,8 @@ import {
   authFailureResponse,
   classifyAuthFailure,
   withAuthResponseHeaders,
+  authFailureStatus,
+  describeAuthFailure,
 } from '@/server/auth/failure.server'
 
 async function handle(request: Request) {
@@ -59,8 +61,12 @@ async function handle(request: Request) {
     return withAuthResponseHeaders(response, requestId)
   } catch (error) {
     const code = classifyAuthFailure(error)
-    console.error('[dayflow:auth] Handler failed', { requestId, path, code })
-    return authFailureResponse(code, 503, requestId)
+    console.error('[dayflow:auth] Handler failed', {
+      requestId,
+      path,
+      ...describeAuthFailure(error),
+    })
+    return authFailureResponse(code, authFailureStatus(error), requestId)
   }
 }
 export const Route = createFileRoute('/api/auth/$')({

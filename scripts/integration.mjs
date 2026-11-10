@@ -134,7 +134,7 @@ try {
           call(auth.getSessionFn, undefined, 'GET', {
             cookie: '__Secure-better-auth.session_token=forged-session',
           }),
-        /Authentication configuration is invalid/,
+        /Session validation failed/,
         'Cookie presence alone never creates an authenticated session',
       )
       assertions++
