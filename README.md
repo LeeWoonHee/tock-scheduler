@@ -78,12 +78,15 @@ npm run typecheck
 npm test
 npm run test:integration
 npm run test:integration:production
+npm run test:integration:postgres
 npm run build
 ```
 
 단위 테스트는 날짜·DST·기간 경계, 워크스페이스 격리, 동시 Inbox 초기화, 재시도, 버전 충돌, 복원, 정렬, 태그 정규화와 목록 간 동일성을 검증합니다. `scripts/integration.mjs`는 포트를 열지 않고 실제 Vite SSR 핸들러에 Request를 전달해 로그인 쿠키·CSRF·서버 함수·목록·캘린더·되돌리기·저장 상태를 검증합니다. 테스트 저장소는 임시 폴더에서 생성하고 정리합니다.
 
 `test:integration:production`은 별도 프로세스의 운영 모드에서 인증·DB 설정이 없는 첫 방문, 로그인 SSR, 작업 공간 접근 차단, 위조 쿠키 거절과 서버 진단 로그를 검증합니다. 실제 Google OAuth 또는 Neon 연결 테스트는 아닙니다.
+
+`test:integration:postgres`는 PGlite의 메모리 PostgreSQL에 실제 Drizzle 마이그레이션을 적용하고 `PostgresRepository`와 `TaskService`를 실행합니다. OAuth가 생성하는 사용자 레코드를 테스트용으로 넣은 뒤 첫 작업 공간·멤버·Inbox 생성, 반복 조회, 사용자 격리, 작업 저장·재시도·버전 충돌, 태그·종일/시각 일정, 섹션 이동, 완료·휴지통·복원을 검사합니다. DB 전송 계층만 테스트 프로세스에서 교체하며 운영 코드나 인증을 변경하지 않습니다. 테스트 종료 시 메모리 DB를 닫습니다. Google OAuth·Neon 네트워크·배포 환경을 검증한 결과는 아닙니다.
 
 수동 브라우저 검증 흐름:
 
