@@ -4,6 +4,7 @@ import { ArrowRight, Check, Loader2 } from 'lucide-react'
 import { getAuthMode, getSessionFn, localLogin } from '@/server/functions/auth'
 import { useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
+import { getGoogleSignInURL, GoogleSignInError } from '@/features/auth/google-sign-in'
 
 export const Route = createFileRoute('/login')({
   validateSearch: (search: Record<string, unknown>): { redirect?: string; error?: string } => ({
@@ -44,20 +45,14 @@ function Login() {
     setPending(true)
     setError('')
     try {
-      const response = await fetch('/api/auth/sign-in/social', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          provider: 'google',
-          callbackURL: search.redirect,
-          errorCallbackURL: '/login?error=oauth',
-        }),
-      })
-      const data = await response.json()
-      if (!response.ok || !data.url) throw new Error()
-      window.location.assign(data.url)
-    } catch {
-      setError('Google 로그인에 연결하지 못했습니다.')
+      const url = await getGoogleSignInURL(search.redirect ?? '/app/today')
+      window.location.assign(url)
+    } catch (error) {
+      setError(
+        error instanceof GoogleSignInError
+          ? error.message
+          : 'Google 로그인을 시작하지 못했습니다. 다시 시도해 주세요.',
+      )
       setPending(false)
     }
   }

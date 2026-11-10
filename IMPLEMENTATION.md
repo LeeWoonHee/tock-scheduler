@@ -294,3 +294,57 @@ if (!getCookie('better-auth.session_token') && !getCookie('__Secure-better-auth.
 - `npm run build` 클라이언트·SSR·Nitro 빌드 통과. 빌드 산출물을 포트 없이 운영 모드로 직접 호출해 첫 방문이 307→307→200으로 로그인 화면에 도달하는 것도 확인했습니다.
 - 운영 검사 CLI가 누락 설정·잘못된 URL·짧은 키·로컬 저장 모드를 거절하고 설정값은 출력하지 않는 것을 검증했습니다. 변경 코드의 Prettier 검사 통과.
 - 위 검증은 기존 로컬 설치본에 대한 결과입니다. Better Auth 미설치 경고가 있으며, 보안 업데이트 의존성의 실제 설치와 Vercel 배포 성공을 의미하지 않습니다.
+
+## Google 로그인 시작 실패의 응답 처리와 진단 개선
+
+버튼의 기존 catch가 HTTP 오류·설정·DB·네트워크·잘못된 응답을 모두 같은 문구로 표시했습니다. 수동 페이지 이동에 맞춰 `disableRedirect: true`를 명시하고 오류 코드와 문의 코드를 보존하도록 수정했습니다. 사용자의 배포 주소·실제 API 응답·서버 로그를 아직 받지 못했으므로 이번 장애의 단일 원인이나 실제 로그인 성공을 확정하지 않았습니다.
+
+### 이번 작업의 변경 파일과 코드
+
+| 파일 | 구분 | 추가·수정·삭제한 코드와 역할 |
+| --- | --- | --- |
+| [src/features/auth/google-sign-in.ts](/Users/leewoonhee/Project/tts/ticktick-copy/src/features/auth/google-sign-in.ts:1) | 추가 | `AuthFailureCode`, `SignInRequest`, `GoogleSignInError`, `getGoogleSignInURL`. 수동 리디렉션 POST 요청·안전한 Google URL 검사·원인별 안내·검증한 문의 코드 표시 |
+| [src/features/auth/google-sign-in.test.ts](/Users/leewoonhee/Project/tts/ticktick-copy/src/features/auth/google-sign-in.test.ts:1) | 추가 | 로그인 요청·성공 주소·설정/DB/네트워크 오류·잘못된 응답·비 Google 주소 거절·서버 상세 미노출 테스트 7개 |
+| [src/server/auth/failure.server.ts](/Users/leewoonhee/Project/tts/ticktick-copy/src/server/auth/failure.server.ts:1) | 추가 | `AuthConfigurationError`, `classifyAuthFailure`로 cause 체인의 설정·모듈·PostgreSQL·네트워크 코드 분류. `authFailureResponse`로 안전한 오류 응답 생성. `withAuthResponseHeaders`로 변경 불가능한 응답도 쿠키·Location·본문을 보존하며 헤더 적용 |
+| [src/server/auth/failure.server.test.ts](/Users/leewoonhee/Project/tts/ticktick-copy/src/server/auth/failure.server.test.ts:1) | 추가 | 중첩·순환 cause 처리, 오류 응답 필드·캐시 금지, immutable redirect 및 여러 Set-Cookie 보존 테스트 5개 |
+| [src/server/auth/auth.server.ts](/Users/leewoonhee/Project/tts/ticktick-copy/src/server/auth/auth.server.ts:38) | 수정 | `withAuth`의 일반 설정 예외를 `AuthConfigurationError`로 교체. 기존 세션 검증과 설정 오류 메시지 유지 |
+| [src/routes/api.auth.$.ts](/Users/leewoonhee/Project/tts/ticktick-copy/src/routes/api.auth.$.ts:9) | 수정 | `handle`에 요청 ID·구체적인 실패 코드·서버 로그 추가. 로그인 POST의 origin 불일치를 403으로 구분. 원본 헤더 직접 수정 코드를 삭제하고 `withAuthResponseHeaders`로 교체. 콜백 리디렉션의 상태·Location·쿠키 보존 |
+| [src/routes/login.tsx](/Users/leewoonhee/Project/tts/ticktick-copy/src/routes/login.tsx:44) | 수정 | `google`의 인라인 fetch·URL 처리·일괄 오류 문구를 삭제하고 `getGoogleSignInURL`, `GoogleSignInError.message` 사용. `pending` 해제와 기존 재시도 흐름 유지 |
+| [scripts/integration.mjs](/Users/leewoonhee/Project/tts/ticktick-copy/scripts/integration.mjs:142) | 수정 | 실제 인증 HTTP 라우트에서 설정 누락 503·문의 코드 일치·캐시 금지·불일치 origin 403을 검증하는 assertion 4개 추가 |
+| [README.md](/Users/leewoonhee/Project/tts/ticktick-copy/README.md:141) | 수정 | 오류 코드별 확인 사항, 접속 origin·콜백 설정, verification 테이블과 초기 마이그레이션의 관계 설명 |
+| [IMPLEMENTATION.md](/Users/leewoonhee/Project/tts/ticktick-copy/IMPLEMENTATION.md:298) | 수정 | 이번 작업의 변경 파일·코드·검증·미확정 배포 원인 기록 |
+
+신규 파일 4개, 수정 파일 6개이며 삭제 파일은 없습니다. 로그인 요청·실패 응답을 작은 공통 함수로 분리했으며 화면 디자인·다른 도메인 기능은 변경하지 않았습니다.
+
+### 핵심 코드
+
+```ts
+body: JSON.stringify({
+  provider: 'google',
+  disableRedirect: true,
+  callbackURL,
+  errorCallbackURL: '/login?error=oauth',
+})
+```
+
+오류 원문을 클라이언트에 보내지 않고 분류한 코드와 로그를 연결할 ID를 보냅니다.
+
+```ts
+{ error: 'Authentication is temporarily unavailable', code, requestId }
+```
+
+### 영향과 남은 작업
+
+- DB·스키마·마이그레이션·환경변수·의존성 변경 없음. 원격 DB 마이그레이션·환경변수 설정·배포는 실행하지 않았습니다.
+- 인증 실패 응답에 `code`, `requestId`, `X-Request-ID`가 추가됩니다. 로그인 시작 API의 공급자 오류는 앱 오류 코드로 정규화하며 자체 로그인 클라이언트도 함께 수정했습니다. 기존 `error` 필드와 HTTP 실패 상태는 유지합니다.
+- 세션·쿠키·CSRF 검증은 유지합니다. 임의 Preview origin을 자동 허용하지 않습니다. 쿠키가 없다는 이유로 로그인 성공 처리하지 않습니다.
+- [Better Auth 1.4.18의 구현](https://github.com/better-auth/better-auth/blob/v1.4.18/packages/better-auth/src/state.ts)은 DB 어댑터 사용 시 Google 이동 전에 verification 레코드를 만듭니다. 인증 테이블이 없다면 이 단계에서 실패할 수 있으므로 초기 마이그레이션 적용 여부가 확인 대상입니다. 사용자 배포의 실제 원인으로 확정한 것은 아닙니다.
+- 남은 작업: 실제 배포 URL과 `/api/auth/sign-in/social`의 응답·동일 문의 코드의 서버 로그로 원인 확정. `BETTER_AUTH_URL` 및 Google 콜백·Neon 스키마를 확인하고 실제 OAuth 왕복 검증.
+
+### 검증
+
+- 타입 검사 통과. 전체 단위 테스트 49개(assertion 154개) 통과.
+- 기존 개발 통합 검증 26개, 운영 통합 검증 15개 통과.
+- `NITRO_PRESET=vercel npm run build` 통과. 생성된 Vercel 함수 entry를 직접 호출해 설정 누락 503·origin 불일치 403·문의 코드의 응답/로그 일치를 확인했습니다.
+- Prettier와 `git diff --check` 통과. 점검용 생성 산출물은 소스 변경에 포함하지 않습니다.
+- npm 레지스트리는 여전히 `ENOTFOUND`여서 Better Auth 설치를 완료하지 못했습니다. 위 테스트·빌드는 기존 로컬 TanStack 설치본에 대한 결과이며, 실제 Better Auth·Google·Neon의 로그인 성공을 검증한 결과는 아닙니다.

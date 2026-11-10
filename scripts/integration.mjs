@@ -138,7 +138,46 @@ try {
         'Cookie presence alone never creates an authenticated session',
       )
       assertions++
+      const signIn = await app.fetch(
+        new Request(origin + '/api/auth/sign-in/social', {
+          method: 'POST',
+          headers: { origin, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+          body: JSON.stringify({
+            provider: 'google',
+            disableRedirect: true,
+            callbackURL: '/app/today',
+          }),
+        }),
+      )
+      const failure = await signIn.json()
+      check(
+        signIn.status === 503 && failure.code === 'AUTH_CONFIGURATION_INVALID',
+        'Sign-in identifies missing server configuration',
+      )
+      check(
+        failure.requestId === signIn.headers.get('x-request-id') &&
+          /^[a-f0-9-]{36}$/i.test(failure.requestId),
+        'Sign-in response includes a matching diagnostic reference',
+      )
+      check(
+        signIn.headers.get('cache-control')?.includes('no-store'),
+        'Auth failures are not cached',
+      )
+      process.env.BETTER_AUTH_URL = origin
+      const blockedSignIn = await app.fetch(
+        new Request(origin + '/api/auth/sign-in/social', {
+          method: 'POST',
+          headers: { origin: 'https://untrusted.example', 'content-type': 'application/json' },
+          body: JSON.stringify({ provider: 'google' }),
+        }),
+      )
+      check(
+        blockedSignIn.status === 403 &&
+          (await blockedSignIn.json()).code === 'AUTH_ORIGIN_MISMATCH',
+        'Sign-in rejects an untrusted origin with a specific code',
+      )
     } finally {
+      delete process.env.BETTER_AUTH_URL
       console.error = originalError
     }
     check(

@@ -138,6 +138,23 @@ Vercel → Project → Settings → Environment Variables에 배포 대상 환�
 
 Vercel 빌드는 이제 `npm run verify:production`을 먼저 실행합니다. 필수 설정 누락·짧은 비밀키·잘못된 공개 URL·Better Auth 미설치·로컬 저장 모드가 있으면 필드 이름을 표시하고 빌드를 중단합니다. 이 검사는 실제 DB 연결이나 테이블 존재, OAuth 성공까지 보장하지 않으므로 설정 후에도 실패하면 Logs의 구체적인 오류를 확인하세요. 비밀키·DB 연결 문자열·쿠키 값은 외부에 공유하지 않습니다.
 
+### Google 로그인 버튼을 눌러도 시작되지 않을 때
+
+버튼은 `/api/auth/sign-in/social`에 `disableRedirect: true`를 보내고, 성공 응답의 Google 인증 주소로 직접 이동합니다. 잘못된 응답이나 Google 이외의 주소로는 이동하지 않습니다. 실패하면 설정·접속 주소·DB·네트워크 오류를 구분하고, 서버에서 발급한 문의 코드를 표시합니다. Vercel Logs에서 같은 `requestId`를 찾아 원인을 확인할 수 있습니다. API 오류 응답은 `error`, `code`, `requestId` 필드를 제공하며 오류 원문이나 비밀 값은 반환하지 않습니다.
+
+| 오류 코드 | 확인할 내용 |
+| --- | --- |
+| `AUTH_CONFIGURATION_INVALID` | 필수 환경변수·키 길이·공개 URL·운영 저장 모드 |
+| `AUTH_ORIGIN_MISMATCH` | 브라우저에서 접속한 origin과 `BETTER_AUTH_URL`이 같은지 확인. 임의 Preview 도메인을 자동 허용하지 않음 |
+| `AUTH_RUNTIME_UNAVAILABLE` | Better Auth와 Drizzle 어댑터의 배포 산출물 포함 여부 |
+| `AUTH_DATABASE_NOT_READY` | 초기 마이그레이션 및 인증 테이블·컬럼 존재 여부 |
+| `AUTH_DATABASE_UNAVAILABLE` | Neon 연결·DB 인증·네트워크 상태 |
+| `AUTH_REQUEST_REJECTED`, `AUTH_SERVICE_UNAVAILABLE` | 같은 문의 코드의 서버 로그에서 공급자·CSRF·DB 오류 확인 |
+
+현재 고정한 [Better Auth 1.4.18](https://github.com/better-auth/better-auth/blob/v1.4.18/packages/better-auth/src/state.ts)은 DB 어댑터가 있으면 Google로 이동하기 전에 verification 레코드를 만듭니다. OAuth 클라이언트 정보를 등록해도 `auth_verification` 등 초기 테이블이 없으면 로그인 시작이 실패할 수 있습니다. 초기 DB를 아직 구성하지 않았다면 `.env`의 `DATABASE_URL_DIRECT`가 올바른 Neon 직접 연결 URL인지 확인하고, 기존 마이그레이션을 검토한 다음 `npm run db:migrate`로 적용하세요. 앱은 로그인 오류를 이유로 테이블을 자동 생성하거나 마이그레이션을 실행하지 않습니다.
+
+Google에 등록한 리디렉션 URI는 `BETTER_AUTH_URL` origin의 `/api/auth/callback/google`과 일치해야 합니다. 현재 접속 URL이 Preview 주소라면 설정한 공식 도메인에서 다시 시도하세요. Google 화면까지 이동한 뒤 오류가 발생하는 경우 Google의 오류 코드와 콜백 설정도 확인해야 합니다.
+
 2차 범위: 반복 규칙·회차 예외·주간 캘린더·칸반·인앱/이메일 알림·보호된 디스패치 엔드포인트·선점과 재시도 워커. `CRON_SECRET`, `EMAIL_API_KEY`, `EMAIL_FROM`은 예시만 있으며 이번 구현에서 사용하지 않습니다. 공유·첨부·오프라인 동기화 등은 기획서의 후속 단계입니다.
 
 ## 주요 파일

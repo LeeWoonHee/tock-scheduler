@@ -12,6 +12,7 @@ import { DomainError } from '../services/errors'
 import { withDatabase, type Database } from '@/db/client.server'
 import * as schema from '@/db/schema'
 import { getAuthConfigurationIssues } from './config.server'
+import { AuthConfigurationError } from './failure.server'
 
 export function isLocalMode() {
   return (
@@ -34,7 +35,7 @@ export async function withAuth<T>(run: (auth: AuthInstance) => Promise<T>) {
   if (issues.length) {
     // Log field names only: configuration values can contain credentials.
     console.error('[dayflow:auth] Invalid configuration', { fields: issues })
-    throw new Error('Authentication configuration is invalid')
+    throw new AuthConfigurationError()
   }
   const {
     BETTER_AUTH_SECRET: secret,
