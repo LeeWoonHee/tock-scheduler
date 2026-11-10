@@ -394,3 +394,83 @@ return authFailureResponse(code, authFailureStatus(error), requestId)
 - Vercel 대상 빌드, 변경 코드 Prettier, `git diff --check` 통과.
 - SQLSTATE가 중첩된 예외에서 보존되고, 4xx가 503으로 바뀌지 않으며, 진단 객체에 원문·비밀 값이 포함되지 않는 것을 검증했습니다.
 - Better Auth 미설치와 기존 TanStack 로컬 설치본 제한은 유지됩니다. 실제 Better Auth 오류 훅 실행과 Google·Neon OAuth 왕복은 검증하지 못했으며, 고정 버전 공식 소스로 옵션 동작을 확인했습니다. 빌드 산출물은 소스 변경에 포함하지 않습니다.
+
+## 42P01 확인 이후의 읽기 전용 DB 점검 추가
+
+사용자의 배포 로그에서 SQLSTATE `42P01`을 확인했습니다. 이는 PostgreSQL이 쿼리의 참조 테이블을 찾지 못한 오류이며, OAuth Internal/Testing 정책에서 발생한 오류가 아닙니다. 어떤 테이블·DB·스키마가 원인인지는 아직 확정하지 않았습니다. 기존 마이그레이션을 반복 적용하기 전에 실제 런타임 DB의 테이블·컬럼을 읽기 전용으로 검사할 도구를 추가했습니다.
+
+### 이번 작업의 변경 파일과 코드
+
+| 파일 | 구분 | 실제 추가·수정한 코드 |
+| --- | --- | --- |
+| [scripts/check-database.mjs](/Users/leewoonhee/Project/tts/ticktick-copy/scripts/check-database.mjs:1) | 추가 | `main`·`inspect`에서 기존 Vite SSR runner로 TS 스키마와 앱 DB 클라이언트를 불러와 13개 테이블의 전체 컬럼을 `limit(0)` SELECT로 검사. `--direct`는 마이그레이션 URL을 선택하며 `--dry-run`은 연결 없이 쿼리만 검증. `targetFingerprint`로 pooled 호스트를 정규화한 호스트·포트·DB 경로의 해시를 비교하고 비밀 값은 출력하지 않음 |
+| [package.json](/Users/leewoonhee/Project/tts/ticktick-copy/package.json:14) | 수정 | `scripts["db:check"]` 추가. 기존 마이그레이션·빌드 명령과 의존성 유지 |
+| [src/server/auth/failure.server.ts](/Users/leewoonhee/Project/tts/ticktick-copy/src/server/auth/failure.server.ts:11) | 수정 | `errorChain`을 제한된 그래프 탐색으로 확장해 Neon의 ErrorEvent.error·AggregateError.errors·순환 원인을 처리. `describeAuthFailure`는 `42P01` 메시지에서 미리 허용한 인증 테이블 식별자만 추출하며 원문·SQL·파라미터는 출력하지 않음 |
+| [src/server/auth/failure.server.test.ts](/Users/leewoonhee/Project/tts/ticktick-copy/src/server/auth/failure.server.test.ts:12) | 수정 | 감싸진 DNS 오류·여러 원인/순환·누락된 table 필드·알 수 없는 테이블 이름 미출력에 대한 테스트 4개 추가 |
+| [README.md](/Users/leewoonhee/Project/tts/ticktick-copy/README.md:160) | 수정 | `db:check`, `--direct`, `--dry-run` 사용법과 식별자 비교의 범위, OAuth 정책과 PostgreSQL 오류의 구분 설명 |
+| [IMPLEMENTATION.md](/Users/leewoonhee/Project/tts/ticktick-copy/IMPLEMENTATION.md:398) | 수정 | 이번 작업의 코드·검증·연결 제한·미해결 운영 상태 기록 |
+
+신규 파일 1개, 수정 파일 5개이며 삭제 파일은 없습니다. 기존 예외 탐색만 재사용 가능한 방식으로 확장했습니다. 앞선 onAPIError·로그인 UI 수정은 이번 변경에 포함하지 않습니다.
+
+### 핵심 코드
+
+```js
+const query = db.select().from(table).limit(0)
+```
+
+모든 컬럼을 검증하되 실제 행은 반환하지 않습니다. DB·테이블·데이터·마이그레이션 이력을 생성·수정·삭제하지 않습니다.
+
+```bash
+npm run db:check
+npm run db:check -- --direct
+npm run db:check -- --dry-run
+```
+
+### 영향과 남은 작업
+
+- DB 스키마·마이그레이션·공개 API 필드·의존성 변경 없음. 새 환경변수는 없습니다.
+- 기본 명령은 기존 `DATABASE_URL`, `--direct`는 `DATABASE_URL_DIRECT`를 사용합니다. 로컬 `.env`에는 현재 DIRECT만 설정되어 있으므로 런타임 점검에는 오류가 발생한 Vercel 배포와 같은 DATABASE_URL을 로컬에 설정해야 합니다. URL은 로그나 대화에 공유하지 않습니다.
+- `--direct`가 선택한 URL은 점검 프로세스 안에서만 앱 DB 클라이언트에 전달하며 `.env`나 Vercel 설정을 수정하지 않습니다. 연결 실패는 첫 오류에서 중단하고 테이블 누락으로 단정하지 않습니다.
+- URL 해시는 연결 대상 비교용입니다. 역할·검색 스키마·URL 옵션·실제 배포의 환경변수 적용 상태까지 같음을 보장하지 않습니다.
+- 실제 운영 DB에서 누락된 관계와 원인을 확인하고 해당 DB의 마이그레이션 상태를 맞추는 작업은 남아 있습니다. Google 로그인 성공이나 운영 DB 복구를 확인하지 않았습니다.
+
+### 검증
+
+- 단위 테스트 57개(assertion 182개), 타입 검사, 운영 통합 검증 15개 통과.
+- `db:check -- --dry-run`: 13개 테이블 쿼리가 모두 SELECT이며 마지막 limit 파라미터가 0인 것을 검증. DB에 연결하지 않았습니다.
+- DB URL 누락·잘못된 프로토콜 입력의 종료 코드와 비밀 값 미출력을 Node assert로 확인. Node 구문 검사·Prettier·`git diff --check` 통과.
+- `db:check -- --direct`로 실제 연결을 시도했으나 이 실행 환경의 DNS 제한으로 `ENOTFOUND`가 발생했습니다. Neon ErrorEvent.error 안의 DNS 코드를 복구하는 것을 재현했습니다. 이 결과는 실제 DB에 auth_user 테이블이 없다는 증거가 아닙니다.
+- 기존 로컬 의존성 기준 Vercel 대상 빌드 통과. Better Auth 및 보안 업데이트 의존성 설치·실제 OAuth 왕복 검증의 기존 제한은 유지됩니다. 생성한 Vercel 산출물은 소스 변경에 포함하지 않습니다.
+
+## tock-scheduler 파비콘 생성 및 적용
+
+기존 파란색 `#002FA7`과 흰색을 사용하고, 시계 다이얼과 체크 모양 바늘을 결합한 SVG 파비콘을 제작했습니다. 작은 탭에서도 보이도록 글자 없이 단순한 도형으로 구성했습니다. 같은 SVG에서 ICO와 Apple용 PNG를 렌더링해 연결하고, 탭 제목과 application-name도 사용자가 지정한 `tock-scheduler`로 맞췄습니다.
+
+### 이번 작업의 변경 파일과 코드
+
+| 파일 | 구분 | 실제 추가·수정·삭제 내용 |
+| --- | --- | --- |
+| [public/favicon.svg](/Users/leewoonhee/Project/tts/ticktick-copy/public/favicon.svg:1) | 수정 | 기존 체크 단독 도형을 교체. 64×64 viewBox, 파란 rounded rect, 흰 원형 다이얼·체크 바늘·12시 표식과 SVG title 추가 |
+| [public/favicon.ico](/Users/leewoonhee/Project/tts/ticktick-copy/public/favicon.ico) | 추가 | 16·32·48px PNG 프레임을 포함한 ICO 폴백 |
+| [public/apple-touch-icon.png](/Users/leewoonhee/Project/tts/ticktick-copy/public/apple-touch-icon.png) | 추가 | 180×180px Apple 아이콘. 같은 심벌을 불투명 파란 배경에 렌더링 |
+| [src/routes/__root.tsx](/Users/leewoonhee/Project/tts/ticktick-copy/src/routes/__root.tsx:33) | 수정 | `Route.head.meta`의 제목을 tock-scheduler로 수정하고 application-name 추가. `Route.head.links`에 ICO·SVG·Apple 아이콘을 연결하고 URL에 `v=tock-scheduler-1` 추가 |
+| [IMPLEMENTATION.md](/Users/leewoonhee/Project/tts/ticktick-copy/IMPLEMENTATION.md:445) | 수정 | 이번 파비콘 작업의 파일·코드·검증·영향 기록 |
+
+신규 파일 2개, 수정 파일 3개이며 삭제 파일과 리팩터링은 없습니다. 이번 보고에는 기존 DB 진단·마이그레이션 등 다른 작업의 변경을 포함하지 않습니다.
+
+### 핵심 코드
+
+```tsx
+{ title: 'tock-scheduler — 하루를 정리하는 작업 공간' }
+{ rel: 'icon', href: '/favicon.svg?v=tock-scheduler-1', type: 'image/svg+xml', sizes: 'any' }
+```
+
+아이콘 URL의 버전으로 이전 파비콘 캐시와 구분합니다. SVG가 원본이며 앱 빌드에 별도 이미지 라이브러리나 생성 단계 의존성을 추가하지 않았습니다.
+
+### 영향과 검증
+
+- DB·스키마·API·환경변수·의존성 변경 없음. 앱 기능의 호환성 파괴 없음.
+- 타입 검사 통과. 실제 로그인 SSR HTML에서 새 title·application-name·3종 아이콘 링크·버전 문자열과 파일 존재를 확인했습니다.
+- SVG XML 파싱, ICO 헤더와 16·32·48px 프레임·PNG 데이터, Apple PNG 180×180 크기 검증 통과. macOS 이미지 디코더에서 ICO와 PNG 형식·크기도 확인했습니다.
+- SVG를 렌더링해 16·32·256px와 Apple 아이콘을 시각 확인했습니다. Prettier·`git diff --check` 통과.
+- 구현 TODO 없음. 실제 배포 사이트의 탭 반영은 원격 재배포 후 확인이 필요하며, 이번 작업에서 원격 배포는 수행하지 않았습니다.

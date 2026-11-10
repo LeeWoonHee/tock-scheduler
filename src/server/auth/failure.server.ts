@@ -11,10 +11,17 @@ export class AuthConfigurationError extends Error {
 function errorChain(error: unknown): Record<string, unknown>[] {
   const seen = new Set<unknown>()
   const chain: Record<string, unknown>[] = []
-  for (let current = error; current && typeof current === 'object' && !seen.has(current);) {
+  const pending: unknown[] = [error]
+  for (let index = 0; index < pending.length && chain.length < 64; index++) {
+    const current = pending[index]
+    if (!current || typeof current !== 'object' || seen.has(current)) continue
     seen.add(current)
     chain.push(current as Record<string, unknown>)
-    current = 'cause' in current ? current.cause : undefined
+    if ('cause' in current) pending.push(current.cause)
+    // Neon/WebSocket can wrap the original network error in ErrorEvent.error.
+    if ('error' in current) pending.push(current.error)
+    if ('errors' in current && Array.isArray(current.errors))
+      pending.push(...current.errors.slice(0, 16))
   }
   return chain
 }
@@ -94,13 +101,38 @@ export function describeAuthFailure(error: unknown) {
         typeof name === 'string' &&
         (name === 'Error' || /^[A-Z][a-zA-Z0-9]{0,60}Error$/.test(name)),
     )
+  const knownTables = new Set([
+    'auth_user',
+    'auth_session',
+    'auth_account',
+    'auth_verification',
+    'workspaces',
+    'workspace_members',
+    'lists',
+    'sections',
+    'tasks',
+    'task_schedules',
+    'tags',
+    'task_tags',
+    'mutation_receipts',
+    'user',
+    'session',
+    'account',
+    'verification',
+  ])
   const tables = chain
     .map((item) => item.table)
-    .filter(
-      (table): table is string =>
-        typeof table === 'string' &&
-        ['auth_user', 'auth_session', 'auth_account', 'auth_verification'].includes(table),
-    )
+    .filter((table): table is string => typeof table === 'string' && knownTables.has(table))
+  for (const item of chain) {
+    if (item.code !== '42P01' || typeof item.message !== 'string') continue
+    // PostgreSQL may omit .table for undefined relations. Extract only an
+    // allowlisted identifier, never the message, SQL, or parameters themselves.
+    const relation = item.message
+      .match(/\b(?:relation|table)\s+"([^"]+)"/i)?.[1]
+      ?.split('.')
+      .at(-1)
+    if (relation && knownTables.has(relation)) tables.push(relation)
+  }
   return {
     code: classifyAuthFailure(error),
     driverCodes: [...new Set(driverCodes)],

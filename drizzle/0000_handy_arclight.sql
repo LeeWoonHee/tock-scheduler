@@ -136,6 +136,10 @@ CREATE TABLE "workspaces" (
 	"time_zone" text DEFAULT 'Asia/Seoul' NOT NULL
 );
 --> statement-breakpoint
+CREATE UNIQUE INDEX "list_workspace_identity" ON "lists" USING btree ("id","workspace_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "section_workspace_list_identity" ON "sections" USING btree ("id","workspace_id","list_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "tag_workspace_identity" ON "tags" USING btree ("id","workspace_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "task_workspace_identity" ON "tasks" USING btree ("id","workspace_id");--> statement-breakpoint
 ALTER TABLE "auth_account" ADD CONSTRAINT "auth_account_user_id_auth_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."auth_user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "lists" ADD CONSTRAINT "lists_workspace_id_workspaces_id_fk" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "mutation_receipts" ADD CONSTRAINT "mutation_receipts_workspace_id_workspaces_id_fk" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -151,15 +155,11 @@ ALTER TABLE "workspace_members" ADD CONSTRAINT "workspace_members_workspace_id_w
 ALTER TABLE "workspace_members" ADD CONSTRAINT "workspace_members_user_id_auth_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."auth_user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "workspaces" ADD CONSTRAINT "workspaces_owner_id_auth_user_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."auth_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "account_provider_unique" ON "auth_account" USING btree ("provider_id","account_id");--> statement-breakpoint
-CREATE UNIQUE INDEX "list_workspace_identity" ON "lists" USING btree ("id","workspace_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "one_inbox_per_workspace" ON "lists" USING btree ("workspace_id") WHERE "lists"."kind" = 'inbox';--> statement-breakpoint
 CREATE INDEX "receipt_expiry" ON "mutation_receipts" USING btree ("expires_at");--> statement-breakpoint
-CREATE UNIQUE INDEX "section_workspace_list_identity" ON "sections" USING btree ("id","workspace_id","list_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "tag_workspace_name" ON "tags" USING btree ("workspace_id","normalized_name");--> statement-breakpoint
-CREATE UNIQUE INDEX "tag_workspace_identity" ON "tags" USING btree ("id","workspace_id");--> statement-breakpoint
 CREATE INDEX "schedule_dates" ON "task_schedules" USING btree ("start_date","end_date_exclusive");--> statement-breakpoint
 CREATE INDEX "schedule_instants" ON "task_schedules" USING btree ("start_at","end_at");--> statement-breakpoint
-CREATE UNIQUE INDEX "task_workspace_identity" ON "tasks" USING btree ("id","workspace_id");--> statement-breakpoint
 CREATE INDEX "task_workspace_status_completed" ON "tasks" USING btree ("workspace_id","status","completed_at");--> statement-breakpoint
 CREATE INDEX "task_list_section_position" ON "tasks" USING btree ("list_id","section_id","position");--> statement-breakpoint
 CREATE UNIQUE INDEX "personal_workspace_owner" ON "workspaces" USING btree ("owner_id");

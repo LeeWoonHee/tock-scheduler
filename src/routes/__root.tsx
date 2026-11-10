@@ -30,7 +30,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: 'utf-8' },
       { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-      { title: 'Dayflow — 하루를 정리하는 작업 공간' },
+      { title: 'tock-scheduler — 하루를 정리하는 작업 공간' },
+      { name: 'application-name', content: 'tock-scheduler' },
       {
         name: 'description',
         content: 'Inbox, 오늘 할 일, 캘린더를 하나의 작업 공간에서 관리하세요.',
@@ -38,7 +39,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     ],
     links: [
       { rel: 'stylesheet', href: styles },
-      { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' },
+      {
+        rel: 'icon',
+        href: '/favicon.ico?v=tock-scheduler-1',
+        type: 'image/x-icon',
+        sizes: '16x16 32x32 48x48',
+      },
+      { rel: 'icon', href: '/favicon.svg?v=tock-scheduler-1', type: 'image/svg+xml', sizes: 'any' },
+      {
+        rel: 'apple-touch-icon',
+        href: '/apple-touch-icon.png?v=tock-scheduler-1',
+        sizes: '180x180',
+      },
     ],
   }),
   component: RootContent,

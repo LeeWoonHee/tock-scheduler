@@ -11,6 +11,7 @@
     "test": "bun test",
     "db:generate": "node --env-file-if-exists=.env node_modules/drizzle-kit/bin.cjs generate",
     "db:migrate": "node --env-file-if-exists=.env node_modules/drizzle-kit/bin.cjs migrate",
+    "db:check": "node --env-file-if-exists=.env scripts/check-database.mjs",
     "test:integration": "node scripts/integration.mjs",
     "test:integration:production": "node scripts/integration.mjs --production",
     "verify:production": "node --env-file-if-exists=.env scripts/check-production.mjs",
