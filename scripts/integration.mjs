@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'vite'
 import { fromCrossJSON, toJSON } from 'seroval'
-import { defaultSerovalPlugins } from '@tanstack/router-core'
+import { defaultSerovalPlugins } from '@tanstack/router-core/ssr/client'
 
 // Exercise real Start handlers, cookies, validation and SSR without opening a port.
 const directory = await mkdtemp(join(tmpdir(), 'dayflow-integration-'))
