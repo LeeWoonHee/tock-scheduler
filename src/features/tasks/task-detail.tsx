@@ -138,8 +138,8 @@ function TaskDetail({ task, close }: { task: Task; close: () => void }) {
             variant="ghost"
             aria-label="할 일 삭제"
             disabled={actions.pending}
-            onClick={async () => {
-              if (await actions.trash(task)) close()
+            onClick={() => {
+              void actions.trash(task)
             }}
           >
             <Trash2 size={15} />

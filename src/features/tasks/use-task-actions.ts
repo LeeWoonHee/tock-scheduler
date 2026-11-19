@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useNavigate, useSearch } from '@tanstack/react-router'
 import { toast } from 'sonner'
 import * as api from '@/server/functions/tasks'
 import type { Result, Task, WorkspaceDTO } from './types'
@@ -20,6 +21,8 @@ function enqueue<T>(id: string, run: () => Promise<T>): Promise<T> {
 }
 export function useTaskActions() {
   const client = useQueryClient()
+  const navigate = useNavigate()
+  const search = useSearch({ from: '/_app/app' })
   const mutation = useMutation({
     mutationKey: ['task-mutation'],
     retry: (count, error) => count < 1 && !(error instanceof ApiError),
@@ -117,6 +120,15 @@ export function useTaskActions() {
   }
   async function trash(task: Task) {
     try {
+      // Close the selected detail before the optimistic cache update hides it.
+      // Otherwise the still-mounted detail briefly renders its not-found state.
+      if (search.task === task.id)
+        await navigate({
+          to: '.',
+          replace: true,
+          search: (previous) =>
+            previous.task === task.id ? { ...previous, task: undefined } : previous,
+        })
       const updated = await run('trashTask', task)
       toast('휴지통으로 이동했어요.', {
         action: {

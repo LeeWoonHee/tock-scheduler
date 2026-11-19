@@ -138,6 +138,22 @@ export function TaskRow({
           aria-label={`우선순위 ${priorityNames[task.priority]}`}
         />
       )}
+      {!task.deletedAt && (
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          aria-label={`${task.title} 삭제`}
+          title="휴지통으로 이동"
+          disabled={actions.pending}
+          className="size-8 shrink-0 text-muted-foreground hover:text-destructive"
+          onClick={() => {
+            void actions.trash(task)
+          }}
+        >
+          <Trash2 size={15} aria-hidden="true" />
+        </Button>
+      )}
       {task.deletedAt ? (
         <Button
           variant="ghost"
